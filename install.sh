@@ -64,11 +64,10 @@ GH="$(gh_bin)" || error "gh installed, but gh was not found."
 # Authenticate for private repo access (opens browser)
 if ! "$GH" auth status &>/dev/null 2>&1; then
     info "Authenticating with GitHub..."
-    "$GH" auth login -w -s repo
+    "$GH" auth login -p https -w -s repo
 fi
-"$GH" auth setup-git --hostname github.com
 
-# Clone private repo via gh, hand off to dev
+# Clone private repo, hand off to dev
 info "Cloning dev-setup..."
-git clone "https://github.com/$REPO.git" "$DIR"
+"$GH" repo clone "$REPO" "$DIR"
 "$DIR/dev" pull -u
