@@ -37,33 +37,28 @@ if [ -d "$DIR" ] && { [ -d "$DIR/.jj" ] || [ -d "$DIR/.git" ]; }; then
     exec "$DIR/dev" pull -u
 fi
 
-# --- Bootstrap gh (needed to clone private repo) ---
+# --- Bootstrap dependencies ---
 
-install_gh() {
-    info "Installing gh..."
+install_bootstrap_deps() {
+    info "Installing bootstrap dependencies..."
     case "$(uname -s)" in
         Darwin)
             ensure_brew
-            "$(brew_bin)" install gh ;;
+            "$(brew_bin)" install gh git ;;
         Linux)
             if command -v dnf &>/dev/null; then
-                sudo dnf install -y gh
+                sudo dnf install -y gh git
             elif command -v apt-get &>/dev/null; then
-                sudo mkdir -p -m 755 /etc/apt/keyrings
-                curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-                    | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-                    | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
                 sudo apt-get update -y
-                sudo apt-get install -y gh
+                sudo apt-get install -y gh git
             else
-                error "Install gh manually, then re-run."
+                error "Install gh and git manually, then re-run."
             fi ;;
         *) error "Unsupported OS" ;;
     esac
 }
 
-gh_bin &>/dev/null || install_gh
+gh_bin &>/dev/null || install_bootstrap_deps
 GH="$(gh_bin)" || error "gh installed, but gh was not found."
 
 # Authenticate for private repo access (opens browser)
