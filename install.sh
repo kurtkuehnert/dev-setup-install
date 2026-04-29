@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Bootstrap script — all real logic lives in `dev`
-# Public bootstrap script; all real logic lives in the private dev-setup repo.
+# Public bootstrap script; all real logic lives in `dev`.
 
 REPO="kurtkuehnert/dev-setup"
 DIR="$HOME/dev-setup"
@@ -47,16 +46,13 @@ install_gh() {
 
 command -v gh &>/dev/null || install_gh
 
-# Authenticate (opens browser)
+# Authenticate for private repo access (opens browser)
 if ! gh auth status &>/dev/null 2>&1; then
     info "Authenticating with GitHub..."
-    gh auth login -p ssh -w -s admin:ssh_signing_key
+    gh auth login -w -s repo
 fi
 
 # Clone private repo via gh, hand off to dev
 info "Cloning dev-setup..."
-gh repo clone "$REPO" "$DIR"
+git clone "https://github.com/$REPO.git" "$DIR"
 "$DIR/dev" pull -u
-
-# Switch remote to SSH now that keys are set up
-git -C "$DIR" remote set-url origin "git@github.com:$REPO.git"
