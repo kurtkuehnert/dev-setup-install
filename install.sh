@@ -51,6 +51,7 @@ if ! gh auth status &>/dev/null 2>&1; then
     info "Authenticating with GitHub..."
     gh auth login -w -s repo
 fi
+gh auth setup-git --hostname github.com
 
 # Clone private repo via gh, hand off to dev
 info "Cloning dev-setup..."
