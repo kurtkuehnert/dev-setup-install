@@ -4,7 +4,9 @@ Set-StrictMode -Version Latest
 # Public Windows bootstrap script; all real logic lives in `dev.ps1`.
 
 $Repo = "kurtkuehnert/dev-setup"
-$Dir = Join-Path $HOME "dev-setup"
+$Dir = Join-Path (Join-Path (Join-Path $HOME "kurtkuehnert") "projects") "dev-setup"
+$Vault = if ($env:PROTON_PASS_VAULT) { $env:PROTON_PASS_VAULT } else { "Dev Setup" }
+$SessionDir = if ($env:PROTON_PASS_SESSION_DIR) { $env:PROTON_PASS_SESSION_DIR } else { Join-Path (Join-Path (Join-Path $HOME ".local") "state") "proton-pass\dev-id" }
 
 function Info {
     param([string]$Message)
@@ -109,21 +111,77 @@ if (-not (Command-Exists winget)) {
 Refresh-Path
 Install-WingetPackage -Id "GitHub.cli" -Name "GitHub CLI"
 Install-WingetPackage -Id "Git.Git" -Name "Git"
+Install-WingetPackage -Id "Proton.ProtonPass.CLI" -Name "Proton Pass CLI"
 
 if (-not (Command-Exists gh)) { throw "GitHub CLI was installed, but gh was not found. Open a new PowerShell window and rerun this script." }
 if (-not (Command-Exists git)) { throw "Git was installed, but git was not found. Open a new PowerShell window and rerun this script." }
+if (-not (Command-Exists pass-cli)) { throw "Proton Pass CLI was installed, but pass-cli was not found. Open a new PowerShell window and rerun this script." }
 
-if (-not (Test-NativeSuccess -Command "gh" -CommandArgs @("auth", "status", "--hostname", "github.com"))) {
-    Info "Authenticating with GitHub..."
-    gh auth login --hostname github.com -p https -w -s repo
+if (-not (Test-Path -LiteralPath $SessionDir)) {
+    New-Item -ItemType Directory -Path $SessionDir | Out-Null
+}
+$env:PROTON_PASS_SESSION_DIR = $SessionDir
+$env:PROTON_PASS_VAULT = $Vault
+
+if (-not (Test-NativeSuccess -Command "pass-cli" -CommandArgs @("info"))) {
+    Info "Authenticating Proton Pass..."
+    $securePat = Read-Host "Paste Proton Pass PAT (pst_...::...)" -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePat)
+    try {
+        $pat = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        if ([string]::IsNullOrWhiteSpace($pat)) {
+            throw "No Proton Pass PAT entered."
+        }
+        pass-cli login --pat $pat *> $null
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        $pat = $null
+    }
 }
 
+function Get-PassField {
+    param(
+        [string]$Item,
+        [string]$Field
+    )
+
+    $value = pass-cli item view --vault-name $Vault --item-title $Item --field $Field
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        throw "Missing Proton item field: $Item/$Field"
+    }
+    return $value
+}
+
+$githubToken = Get-PassField -Item "GitHub kurtkuehnert" -Field "token"
+$env:GH_TOKEN = $githubToken
+$env:GITHUB_TOKEN = $githubToken
+
+$gitlabToken = Get-PassField -Item "GitLab nolag" -Field "token"
+$env:GITLAB_TOKEN = $gitlabToken
+$env:GITLAB_ACCESS_TOKEN = $gitlabToken
+
 if (Test-Path -LiteralPath $Dir) {
-    Info "dev-setup already installed, running pull..."
-    git -C $Dir pull --ff-only
-} else {
+    if ((Test-Path -LiteralPath (Join-Path $Dir ".git")) -or (Test-Path -LiteralPath (Join-Path $Dir ".jj"))) {
+        Info "dev-setup already installed."
+    } else {
+        $children = @(Get-ChildItem -LiteralPath $Dir -Force)
+        if ($children.Count -eq 0) {
+            Remove-Item -LiteralPath $Dir -Force
+        } else {
+            throw "$Dir exists but is not a dev-setup checkout; refusing to overwrite it."
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath $Dir)) {
+    $parent = Split-Path -Parent $Dir
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent | Out-Null
+    }
     Info "Cloning dev-setup..."
     gh repo clone $Repo $Dir
+} else {
+    Info "Running dev pull..."
 }
 
 Install-DevLauncher

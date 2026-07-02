@@ -4,7 +4,9 @@ set -euo pipefail
 # Public bootstrap script; all real logic lives in `dev`.
 
 REPO="kurtkuehnert/dev-setup"
-DIR="$HOME/dev-setup"
+DIR="$HOME/kurtkuehnert/projects/dev-setup"
+VAULT="${PROTON_PASS_VAULT:-Dev Setup}"
+SESSION_DIR="${PROTON_PASS_SESSION_DIR:-$HOME/.local/state/proton-pass/dev-id}"
 
 info() { printf '\033[1;34m%s\033[0m\n' "$1"; }
 error() { printf '\033[1;31m%s\033[0m\n' "$1"; exit 1; }
@@ -16,6 +18,25 @@ brew_bin() {
     return 1
 }
 
+real_bin() {
+    local name="$1" shim candidate candidate_path
+    shim="$(realpath "$HOME/.local/bin/$name" 2>/dev/null || true)"
+
+    while IFS= read -r candidate; do
+        candidate_path="$(realpath "$candidate" 2>/dev/null || true)"
+        if [ -n "$candidate_path" ] && [ "$candidate_path" != "$shim" ] && [ -x "$candidate_path" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done < <(type -P -a "$name" 2>/dev/null || true)
+
+    for candidate in "/opt/homebrew/bin/$name" "/usr/local/bin/$name" "/usr/bin/$name"; do
+        [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+    done
+
+    return 1
+}
+
 ensure_brew() {
     brew_bin &>/dev/null && return 0
     info "Installing Homebrew..."
@@ -23,51 +44,87 @@ ensure_brew() {
     brew_bin &>/dev/null || error "Homebrew installed, but brew was not found."
 }
 
-gh_bin() {
-    command -v gh 2>/dev/null && return 0
-    [ -x /opt/homebrew/bin/gh ] && { echo /opt/homebrew/bin/gh; return 0; }
-    [ -x /usr/local/bin/gh ] && { echo /usr/local/bin/gh; return 0; }
-    [ -x /usr/bin/gh ] && { echo /usr/bin/gh; return 0; }
-    return 1
-}
-
-# Already installed — just pull
-if [ -d "$DIR" ] && { [ -d "$DIR/.jj" ] || [ -d "$DIR/.git" ]; }; then
-    info "dev-setup already installed, running pull..."
-    exec "$DIR/dev" pull -u
-fi
-
-# --- Bootstrap dependencies ---
-
-install_bootstrap_deps() {
-    info "Installing bootstrap dependencies..."
+ensure_bootstrap_deps() {
+    info "Checking bootstrap dependencies..."
     case "$(uname -s)" in
         Darwin)
             ensure_brew
-            "$(brew_bin)" install gh git ;;
+            "$(brew_bin)" install gh git pass-cli ;;
         Linux)
             if command -v dnf &>/dev/null; then
-                sudo dnf install -y gh git
+                sudo dnf install -y gh git curl
             elif command -v apt-get &>/dev/null; then
                 sudo apt-get update -y
-                sudo apt-get install -y gh git
+                sudo apt-get install -y gh git curl
             else
-                error "Install gh and git manually, then re-run."
-            fi ;;
+                error "Install gh, git, curl, and pass-cli manually, then re-run."
+            fi
+            command -v pass-cli >/dev/null || curl -fsSL https://proton.me/download/pass-cli/install.sh | bash ;;
         *) error "Unsupported OS" ;;
     esac
+
+    real_bin gh >/dev/null || error "gh is missing after bootstrap dependency install."
+    real_bin git >/dev/null || error "git is missing after bootstrap dependency install."
+    command -v pass-cli >/dev/null || error "pass-cli is missing after bootstrap dependency install."
 }
 
-gh_bin &>/dev/null || install_bootstrap_deps
-GH="$(gh_bin)" || error "gh installed, but gh was not found."
+ensure_proton_login() {
+    export PROTON_PASS_SESSION_DIR="$SESSION_DIR"
+    mkdir -p "$PROTON_PASS_SESSION_DIR"
 
-# Authenticate for private repo access (opens browser)
-if ! "$GH" auth status &>/dev/null 2>&1; then
-    info "Authenticating with GitHub..."
-    "$GH" auth login -p https -w -s repo
-fi
+    if pass-cli info >/dev/null 2>&1; then
+        return 0
+    fi
 
-# Clone private repo, hand off to dev
-info "Cloning dev-setup..."
-"$GH" repo clone "$REPO" "$DIR"
-"$DIR/dev" pull -u
+    if [ ! -t 0 ] && [ ! -r /dev/tty ]; then
+        error "Proton Pass login is required, but no TTY is available."
+    fi
+
+    info "Authenticating Proton Pass..."
+    printf 'Paste Proton Pass PAT (pst_...::...): ' > /dev/tty
+    IFS= read -r -s proton_pat < /dev/tty
+    printf '\n' > /dev/tty
+    [ -n "$proton_pat" ] || error "No Proton Pass PAT entered."
+
+    pass-cli login --pat "$proton_pat" >/dev/null
+}
+
+pass_field() {
+    local item="$1" field="$2"
+    PROTON_PASS_AGENT_REASON="Load $item/$field for dev-setup install" \
+        pass-cli item view --vault-name "$VAULT" --item-title "$item" --field "$field"
+}
+
+export_github_token() {
+    local token
+    token="$(pass_field "GitHub kurtkuehnert" token)" || error "Missing Proton item field: GitHub kurtkuehnert/token"
+    [ -n "$token" ] || error "Empty Proton item field: GitHub kurtkuehnert/token"
+    export GH_TOKEN="$token"
+    export GITHUB_TOKEN="$token"
+}
+
+clone_or_update_repo() {
+    if [ -d "$DIR/.git" ] || [ -d "$DIR/.jj" ]; then
+        info "dev-setup already installed."
+        return 0
+    fi
+
+    if [ -e "$DIR" ]; then
+        if [ -z "$(find "$DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+            rmdir "$DIR"
+        else
+            error "$DIR exists but is not a dev-setup checkout; refusing to overwrite it."
+        fi
+    fi
+
+    mkdir -p "$(dirname "$DIR")"
+    info "Cloning dev-setup..."
+    "$(real_bin gh)" repo clone "$REPO" "$DIR"
+}
+
+ensure_bootstrap_deps
+ensure_proton_login
+export_github_token
+clone_or_update_repo
+
+exec "$DIR/dev" pull -u
