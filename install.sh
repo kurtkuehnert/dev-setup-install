@@ -139,4 +139,4 @@ ensure_proton_login
 export_github_token
 clone_or_update_repo
 
-exec "$DIR/dev" pull -u
+exec "$DIR/dev" pull
