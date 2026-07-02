@@ -44,12 +44,20 @@ ensure_brew() {
     brew_bin &>/dev/null || error "Homebrew installed, but brew was not found."
 }
 
+brew_install_missing() {
+    local name="$1" command_name="${2:-$1}"
+    real_bin "$command_name" >/dev/null && return 0
+    "$(brew_bin)" install "$name"
+}
+
 ensure_bootstrap_deps() {
     info "Checking bootstrap dependencies..."
     case "$(uname -s)" in
         Darwin)
             ensure_brew
-            "$(brew_bin)" install gh git pass-cli ;;
+            brew_install_missing gh gh
+            brew_install_missing git git
+            brew_install_missing pass-cli pass-cli ;;
         Linux)
             if command -v dnf &>/dev/null; then
                 sudo dnf install -y gh git curl
