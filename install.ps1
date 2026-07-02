@@ -124,6 +124,12 @@ $env:PROTON_PASS_SESSION_DIR = $SessionDir
 $env:PROTON_PASS_VAULT = $Vault
 
 if (-not (Test-NativeSuccess -Command "pass-cli" -CommandArgs @("info"))) {
+    pass-cli logout *> $null
+    if (Test-Path -LiteralPath $SessionDir) {
+        Remove-Item -LiteralPath $SessionDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $SessionDir | Out-Null
+
     Info "Authenticating Proton Pass..."
     $securePat = Read-Host "Paste Proton Pass PAT (pst_...::...)" -AsSecureString
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePat)

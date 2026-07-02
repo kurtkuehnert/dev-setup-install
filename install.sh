@@ -84,6 +84,10 @@ ensure_proton_login() {
         return 0
     fi
 
+    pass-cli logout >/dev/null 2>&1 || true
+    rm -rf "$PROTON_PASS_SESSION_DIR"
+    mkdir -p "$PROTON_PASS_SESSION_DIR"
+
     if [ ! -t 0 ] && [ ! -r /dev/tty ]; then
         error "Proton Pass login is required, but no TTY is available."
     fi
