@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-# Public Windows bootstrap script; all real logic lives in `dev.ps1`.
+# Public Windows bootstrap script. Git Bash runs the shared Python CLI.
 
 $Repo = "kurtkuehnert/dev-setup"
 $Dir = Join-Path (Join-Path (Join-Path $HOME "kurtkuehnert") "projects") "dev-setup"
@@ -82,9 +82,9 @@ function Install-DevLauncher {
     }
 
     $cmdPath = Join-Path $binDir "dev.cmd"
-    $cmdContent = @"
+$cmdContent = @"
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Dir\dev.ps1" %*
+"$env:ProgramFiles\Git\bin\bash.exe" "$($Dir.Replace('\', '/'))/dev" %*
 "@
     Set-Content -LiteralPath $cmdPath -Value $cmdContent -Encoding ASCII
 
@@ -112,10 +112,12 @@ Refresh-Path
 Install-WingetPackage -Id "GitHub.cli" -Name "GitHub CLI"
 Install-WingetPackage -Id "Git.Git" -Name "Git"
 Install-WingetPackage -Id "Proton.ProtonPass.CLI" -Name "Proton Pass CLI"
+Install-WingetPackage -Id "astral-sh.uv" -Name "uv"
 
 if (-not (Command-Exists gh)) { throw "GitHub CLI was installed, but gh was not found. Open a new PowerShell window and rerun this script." }
 if (-not (Command-Exists git)) { throw "Git was installed, but git was not found. Open a new PowerShell window and rerun this script." }
 if (-not (Command-Exists pass-cli)) { throw "Proton Pass CLI was installed, but pass-cli was not found. Open a new PowerShell window and rerun this script." }
+if (-not (Command-Exists uv)) { throw "uv was installed, but was not found. Open a new PowerShell window and rerun this script." }
 
 if (-not (Test-Path -LiteralPath $SessionDir)) {
     New-Item -ItemType Directory -Path $SessionDir | Out-Null
@@ -191,4 +193,9 @@ if (-not (Test-Path -LiteralPath $Dir)) {
 }
 
 Install-DevLauncher
-& (Join-Path $Dir "dev.ps1") pull
+$bash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
+if (-not (Test-Path -LiteralPath $bash)) {
+    throw "Git Bash was installed, but bash.exe was not found at $bash."
+}
+$bashDir = $Dir.Replace('\', '/')
+& $bash "$bashDir/dev" pull
