@@ -7,6 +7,7 @@ REPO="kurtkuehnert/dev-setup"
 DIR="$HOME/kurtkuehnert/projects/dev-setup"
 VAULT="${PROTON_PASS_VAULT:-Dev Setup}"
 SESSION_DIR="${PROTON_PASS_SESSION_DIR:-$HOME/.local/state/proton-pass/dev-id}"
+PAT_KEYCHAIN_SERVICE="${PROTON_PASS_PAT_KEYCHAIN_SERVICE:-dev-setup-proton-pass-pat}"
 
 info() { printf '\033[1;34m%s\033[0m\n' "$1"; }
 error() { printf '\033[1;31m%s\033[0m\n' "$1"; exit 1; }
@@ -55,9 +56,11 @@ ensure_bootstrap_deps() {
     case "$(uname -s)" in
         Darwin)
             ensure_brew
+            eval "$("$(brew_bin)" shellenv)"
             brew_install_missing gh gh
             brew_install_missing git git
-            brew_install_missing pass-cli pass-cli ;;
+            brew_install_missing pass-cli pass-cli
+            brew_install_missing uv uv ;;
         Linux)
             if command -v dnf &>/dev/null; then
                 sudo dnf install -y gh git curl
@@ -67,16 +70,40 @@ ensure_bootstrap_deps() {
             else
                 error "Install gh, git, curl, and pass-cli manually, then re-run."
             fi
-            command -v pass-cli >/dev/null || curl -fsSL https://proton.me/download/pass-cli/install.sh | bash ;;
+            command -v pass-cli >/dev/null || curl -fsSL https://proton.me/download/pass-cli/install.sh | bash
+            command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$PATH" ;;
         *) error "Unsupported OS" ;;
     esac
 
     real_bin gh >/dev/null || error "gh is missing after bootstrap dependency install."
     real_bin git >/dev/null || error "git is missing after bootstrap dependency install."
     command -v pass-cli >/dev/null || error "pass-cli is missing after bootstrap dependency install."
+    command -v uv >/dev/null || error "uv is missing after bootstrap dependency install."
+}
+
+keychain_pat() {
+    [ "$(uname -s)" = "Darwin" ] || return 1
+    command -v security >/dev/null 2>&1 || return 1
+
+    security find-generic-password \
+        -a "$USER" \
+        -s "$PAT_KEYCHAIN_SERVICE" \
+        -w 2>/dev/null
+}
+
+login_with_pat() {
+    local proton_pat="$1"
+
+    pass-cli logout >/dev/null 2>&1 || true
+    rm -rf "$PROTON_PASS_SESSION_DIR"
+    mkdir -p "$PROTON_PASS_SESSION_DIR"
+    PROTON_PASS_PERSONAL_ACCESS_TOKEN="$proton_pat" pass-cli login >/dev/null
 }
 
 ensure_proton_login() {
+    local proton_pat
+
     export PROTON_PASS_SESSION_DIR="$SESSION_DIR"
     mkdir -p "$PROTON_PASS_SESSION_DIR"
 
@@ -84,9 +111,12 @@ ensure_proton_login() {
         return 0
     fi
 
-    pass-cli logout >/dev/null 2>&1 || true
-    rm -rf "$PROTON_PASS_SESSION_DIR"
-    mkdir -p "$PROTON_PASS_SESSION_DIR"
+    if proton_pat="$(keychain_pat)" && [ -n "$proton_pat" ]; then
+        if login_with_pat "$proton_pat"; then
+            return 0
+        fi
+        info "Stored Proton Pass PAT failed; paste a fresh one or update Keychain."
+    fi
 
     if [ ! -t 0 ] && [ ! -r /dev/tty ]; then
         error "Proton Pass login is required, but no TTY is available."
@@ -98,7 +128,7 @@ ensure_proton_login() {
     printf '\n' > /dev/tty
     [ -n "$proton_pat" ] || error "No Proton Pass PAT entered."
 
-    pass-cli login --pat "$proton_pat" >/dev/null
+    login_with_pat "$proton_pat"
 }
 
 pass_field() {
